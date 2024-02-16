@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "9yW2upfrN3ZMcaLmI+bm0wcL+IFfIkQAH4fkoupusK32DDrzvQWABnSL3QztYJLG8qJso3O4yFiPDjG1IY2xzg==",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Public\\armanproject\\armanproject.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\SUPPORT\\.nuget\\packages\\awssdk.core\\3.7.302.11\\awssdk.core.3.7.302.11.nupkg.sha512",
+    "C:\\Users\\SUPPORT\\.nuget\\packages\\awssdk.textract\\3.7.300.51\\awssdk.textract.3.7.300.51.nupkg.sha512"
+  ],
+  "logs": []
+}

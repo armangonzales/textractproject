@@ -1,10 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Amazon;
-using Amazon.S3;
-using Amazon.S3.Model;
 using Amazon.Textract;
 using Amazon.Textract.Model;
 
@@ -17,175 +14,189 @@ namespace armanproject
             // Configure your AWS credentials and region
             var accessKeyId = "AKIATRMF5LV4HOEP45HR";
             var secretAccessKey = "PjMUHt2sHUmfqd05v/ezbtbp6bbkwD4wTo0D9yum";
-            var region = RegionEndpoint.APSoutheast1;
+            var region = RegionEndpoint.APSoutheast1; // Update with your region
 
-            // Initialize Amazon Textract and S3 clients
+            // Initialize Amazon Textract client
             using var textractClient = new AmazonTextractClient(accessKeyId, secretAccessKey, region);
-            using var s3Client = new AmazonS3Client(accessKeyId, secretAccessKey, region);
 
-            // Specify the S3 bucket name and the PDF file key
+            // Specify the S3 bucket name and the document key
             var bucketName = "armansample";
-            var pdfFileKey = "sampleimg1.jpg";
+            var documentKey = "example8.pdf";
 
-            // Download the PDF file from S3
-            var pdfContent = await GetS3ObjectContentAsync(s3Client, bucketName, pdfFileKey);
+           var jobId = await StartDocumentTextDetectionAsync(textractClient, bucketName, documentKey);
 
-            // Specify the parameters for the AnalyzeDocument request
-            var request = new AnalyzeDocumentRequest
+            Console.WriteLine($"Text detection job started with ID: {jobId}");
+
+            // Wait for the job to complete
+            Console.WriteLine("Waiting for job to complete...");
+            var jobStatus = await WaitForJobCompletionAsync(textractClient, jobId);
+
+            if (jobStatus == "SUCCEEDED")
             {
-                Document = new Document
+                // Get the results of the text detection job
+                var extractedText = await GetExtractedTextAsync(textractClient, jobId);
+
+                // Output the extracted content
+                extractedText.Output();
+            }
+            else
+            {
+                Console.WriteLine($"Job failed with status: {jobStatus}");
+            }
+        }
+
+        static async Task<string> StartDocumentTextDetectionAsync(AmazonTextractClient textractClient, string bucketName, string documentKey)
+        {
+            var request = new StartDocumentTextDetectionRequest
+            {
+                DocumentLocation = new DocumentLocation
                 {
-                    Bytes = new MemoryStream(pdfContent)
-                },
-                FeatureTypes = new List<string> { "TABLES", "FORMS" } // Specify the features to extract
+                    S3Object = new S3Object
+                    {
+                        Bucket = bucketName,
+                        Name = documentKey
+                    }
+                }
             };
 
-            // Call the AnalyzeDocument operation asynchronously
-            var response = await textractClient.AnalyzeDocumentAsync(request);
-
-            // Process the response
-            var extractionResult = ProcessResponse(response);
-
-            // Output the extracted data
-            extractionResult.Output();
+            var response = await textractClient.StartDocumentTextDetectionAsync(request);
+            return response.JobId;
         }
 
-        static async Task<byte[]> GetS3ObjectContentAsync(IAmazonS3 s3Client, string bucketName, string objectKey)
+        static async Task<string> WaitForJobCompletionAsync(AmazonTextractClient textractClient, string jobId)
         {
-            var getObjectRequest = new GetObjectRequest
+            string jobStatus = null;
+
+            while (true)
             {
-                BucketName = bucketName,
-                Key = objectKey
-            };
+                var response = await textractClient.GetDocumentTextDetectionAsync(new GetDocumentTextDetectionRequest
+                {
+                    JobId = jobId
+                });
 
-            using var response = await s3Client.GetObjectAsync(getObjectRequest);
-            using var responseStream = response.ResponseStream;
-            using var memoryStream = new MemoryStream();
+                jobStatus = response.JobStatus;
 
-            await responseStream.CopyToAsync(memoryStream);
-            return memoryStream.ToArray();
+                if (jobStatus == "SUCCEEDED" || jobStatus == "FAILED" || jobStatus == "PARTIAL_SUCCESS")
+                {
+                    break;
+                }
+
+                // Wait before polling again
+                await Task.Delay(5000); // Wait for 5 seconds before polling again
+            }
+
+            return jobStatus;
         }
 
-        static ExtractionResult ProcessResponse(AnalyzeDocumentResponse response)
+        static async Task<ExtractedContent> GetExtractedTextAsync(AmazonTextractClient textractClient, string jobId)
         {
-            var extractionResult = new ExtractionResult();
-
-            // Dictionary to hold tables and their corresponding text blocks
-            var tableBlocks = new Dictionary<string, List<Block>>();
-
-            // Iterate through the blocks in the response
-            foreach (var block in response.Blocks)
+            var response = await textractClient.GetDocumentTextDetectionAsync(new GetDocumentTextDetectionRequest
             {
-                switch (block.BlockType)
+                JobId = jobId
+            });
+
+            // Process the blocks and separate them into text, tables, and forms
+            var textBlocks = new List<Block>();
+            var tableBlocks = new List<Block>();
+            var formBlocks = new List<Block>();
+
+            foreach (var item in response.Blocks)
+            {
+                switch (item.BlockType)
                 {
                     case "LINE":
-                        // For lines, add the text to the raw text list
-                        extractionResult.RawText.Add(block.Text);
+                        textBlocks.Add(item);
                         break;
                     case "TABLE":
-                        // For tables, add the table block to the dictionary
-                        tableBlocks[block.Id] = new List<Block> { block };
-                        break;
-                    case "CELL":
-                        // For cells, find the corresponding table and add the cell block to it
-                        var cellTableId = block.Relationships.FirstOrDefault(r => r.Type == "CHILD")?.Ids[0];
-                        if (cellTableId != null && tableBlocks.ContainsKey(cellTableId))
-                        {
-                            tableBlocks[cellTableId].Add(block);
-                        }
+                        tableBlocks.Add(item);
                         break;
                     case "KEY_VALUE_SET":
-                        // For key-value sets, add the form block and its relationships to the extraction result
-                        extractionResult.Forms.Add(new Form { KeyValueSetBlock = block, Relationships = block.Relationships });
+                        formBlocks.Add(item);
                         break;
                 }
             }
 
-            // Process tables
-            foreach (var tableBlockList in tableBlocks.Values)
+            return new ExtractedContent
             {
-                var table = new Table();
-                foreach (var cellBlock in tableBlockList)
-                {
-                    table.AddCell(cellBlock.Text);
-                }
-                extractionResult.Tables.Add(table);
-            }
-
-            return extractionResult;
+                Text = new Text(textBlocks),
+                Tables = new Tables(tableBlocks),
+                Forms = new Forms(formBlocks)
+            };
         }
     }
 
-    class ExtractionResult
+    class ExtractedContent
     {
-        public List<string> RawText { get; } = new List<string>();
-        public List<Table> Tables { get; } = new List<Table>();
-        public List<Form> Forms { get; } = new List<Form>();
+        public Text Text { get; set; }
+        public Tables Tables { get; set; }
+        public Forms Forms { get; set; }
 
         public void Output()
         {
-            Console.WriteLine("Tables:");
-            foreach (var table in Tables)
-            {
-                table.Output();
-            }
+            Console.WriteLine("Text:");
+            Text.Output();
+
+            Console.WriteLine("\nTables:");
+            Tables.Output();
 
             Console.WriteLine("\nForms:");
-            foreach (var form in Forms)
-            {
-                form.Output();
-            }
-
-            Console.WriteLine("\nRaw Text:");
-            foreach (var text in RawText)
-            {
-                Console.WriteLine(text);
-            }
+            Forms.Output();
         }
     }
 
-    class Table
+    class Text
     {
-        public List<List<string>> Rows { get; } = new List<List<string>>();
+        private List<Block> _textBlocks;
 
-        public void AddCell(string cellText)
+        public Text(List<Block> textBlocks)
         {
-            if (Rows.Count == 0 || Rows[Rows.Count - 1].Count > 0)
-            {
-                Rows.Add(new List<string>());
-            }
-            Rows[Rows.Count - 1].Add(cellText);
+            _textBlocks = textBlocks;
         }
 
         public void Output()
         {
-            foreach (var row in Rows)
+            foreach (var block in _textBlocks)
             {
-                foreach (var cell in row)
-                {
-                    Console.Write(cell + " ");
-                }
-                Console.WriteLine();
+                Console.WriteLine(block.Text);
             }
-            Console.WriteLine();
         }
     }
 
-    class Form
+    class Tables
     {
-        public Block? KeyValueSetBlock { get; set; }
-        public List<Relationship>? Relationships { get; set; }
+        private List<Block> _tableBlocks;
+
+        public Tables(List<Block> tableBlocks)
+        {
+            _tableBlocks = tableBlocks;
+        }
 
         public void Output()
         {
-
-            if (KeyValueSetBlock != null && Relationships != null){
-            foreach (var relationship in Relationships)
+            foreach (var block in _tableBlocks)
             {
-                Console.WriteLine($"Key: {relationship.Type}, Value: {relationship.Ids[0]}");
+                Console.WriteLine("Table:");
+                Console.WriteLine(block.Text);
             }
-            Console.WriteLine();
         }
-       }
+    }
+
+    class Forms
+    {
+        private List<Block> _formBlocks;
+
+        public Forms(List<Block> formBlocks)
+        {
+            _formBlocks = formBlocks;
+        }
+
+        public void Output()
+        {
+            foreach (var block in _formBlocks)
+            {
+                Console.WriteLine("Form:");
+                Console.WriteLine(block.Text);
+            }
+        }
     }
 }

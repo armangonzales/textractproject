@@ -1,13 +1,7 @@
-<<<<<<< HEAD
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text;
-=======
 using System;
 using System.Collections.Generic;
 using System.IO;
->>>>>>> 2f3d0867c097d63c351b125df3fd3948f849a5d8
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Amazon;
@@ -44,11 +38,7 @@ namespace armanproject
                 var extractedContent = await GetExtractedContentAsync(textractClient, jobId);
 
                 // Serialize the extracted content to JSON
-<<<<<<< HEAD
                 var json = JsonSerializer.Serialize(extractedContent, new JsonSerializerOptions { WriteIndented = true });
-=======
-                var json = JsonSerializer.Serialize(extractedContent);
->>>>>>> 2f3d0867c097d63c351b125df3fd3948f849a5d8
                 Console.WriteLine(json);
             }
             else
@@ -107,17 +97,10 @@ namespace armanproject
                 JobId = jobId
             });
 
-<<<<<<< HEAD
             // Initialize lists to store extracted content
             var textBlocks = new List<ContentBlock>();
             var tableBlocks = new List<Table>();
             var formBlocks = new List<Form>();
-=======
-            // Process the blocks and separate them into text, tables, and forms
-            var textBlocks = new List<string>();
-            var tableBlocks = new List<string>();
-            var formBlocks = new List<string>();
->>>>>>> 2f3d0867c097d63c351b125df3fd3948f849a5d8
 
             // Iterate through each block in the response
             foreach (var block in response.Blocks)
@@ -125,7 +108,6 @@ namespace armanproject
                 switch (block.BlockType)
                 {
                     case "LINE":
-<<<<<<< HEAD
                         // Extract text
                         textBlocks.Add(new ContentBlock { Confidence = block.Confidence, Text = block.Text });
                         break;
@@ -144,15 +126,6 @@ namespace armanproject
                         {
                             formBlocks.Add(form);
                         }
-=======
-                        textBlocks.Add(item.Text);
-                        break;
-                    case "TABLE":
-                        tableBlocks.Add(item.Text);
-                        break;
-                    case "KEY_VALUE_SET":
-                        formBlocks.Add(item.Text);
->>>>>>> 2f3d0867c097d63c351b125df3fd3948f849a5d8
                         break;
                 }
             }
@@ -222,7 +195,6 @@ namespace armanproject
 
     class ExtractedContent
     {
-<<<<<<< HEAD
         public List<ContentBlock> Text { get; set; }
         public List<Table> Tables { get; set; }
         public List<Form> Forms { get; set; }
@@ -252,11 +224,6 @@ namespace armanproject
         {
             Fields.Add(field);
         }
-=======
-        public List<string> Text { get; set; }
-        public List<string> Tables { get; set; }
-        public List<string> Forms { get; set; }
->>>>>>> 2f3d0867c097d63c351b125df3fd3948f849a5d8
     }
 
     class FormField

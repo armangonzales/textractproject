@@ -7,31 +7,89 @@ using Amazon;
 using Amazon.Textract;
 using Amazon.Textract.Model;
 using Newtonsoft.Json;
+using System.Data;
 
 namespace armanproject
 {
-    class TextClass
+    // Class for storing extracted text
+    public class TextClass
     {
         public string Text { get; set; }
         public float Confidence { get; set; }
     }
 
-    class TableCell
+    // Class for storing extracted table data
+    public class DataTable
     {
-        public string Text { get; set; }
-        public float Confidence { get; set; }
-        public int RowIndex { get; set; }
-        public int ColumnIndex { get; set; }
+        // Property to store table data
+        public System.Data.DataTable Table { get; }
 
-        public static async Task<TableCell> ExtractFromBlock(Block block, AnalyzeDocumentResponse response)
+        // Constructor to initialize the table
+        public DataTable()
         {
-            TableCell tableCell = new TableCell();
+            Table = new System.Data.DataTable();
+            Table.Columns.Add("Text", typeof(string)); // Add a single column for text
+        }
+    }
 
-            if (block.BlockType == "CELL")
+    // Class for storing extracted forms 
+    public class Forms
+    {
+        public string Key { get; set; }
+        public string Value { get; set; }
+    }
+
+    // Main Class
+    public class Program
+    {
+    static async Task Main(string[] args)
+    {
+        var awsCredentials = new Amazon.Runtime.BasicAWSCredentials("AKIATRMF5LV4HOEP45HR", "PjMUHt2sHUmfqd05v/ezbtbp6bbkwD4wTo0D9yum");
+        var awsRegion = Amazon.RegionEndpoint.APSoutheast1;
+
+        var textractClient = new AmazonTextractClient(awsCredentials, awsRegion);
+
+        string s3BucketName = "armansample";
+        string s3ObjectKey = "sampleimg1.jpg";
+
+        var request = new AnalyzeDocumentRequest
+        {
+            Document = new Document
             {
-                StringBuilder textBuilder = new StringBuilder();
+                S3Object = new S3Object
+                {
+                    Bucket = s3BucketName,
+                    Name = s3ObjectKey
+                }
+            },
 
-                foreach (var relationship in block.Relationships)
+            FeatureTypes = new List<string> { "TABLES", "FORMS" }
+        };
+
+        var response = await textractClient.AnalyzeDocumentAsync(request);
+
+        var extractedText = new List<TextClass>();
+        var extractedDataTable = new DataTable();
+        var extractedForms = new List<Forms>(); 
+
+        // Extracted Text from AWS moved to TextClass
+        foreach (var item in response.Blocks)
+        {
+            if (item.BlockType == "WORD")
+            {
+                var textClass = new TextClass
+                {
+                    Text = item.Text,
+                    Confidence = item.Confidence
+                };
+                extractedText.Add(textClass);
+            }
+
+            else if (item.BlockType == "CELL")
+            {
+                // Extract text from table cell
+                StringBuilder cellText = new StringBuilder();
+                foreach (var relationship in item.Relationships)
                 {
                     if (relationship.Type == "CHILD")
                     {
@@ -40,91 +98,78 @@ namespace armanproject
                             var childBlock = response.Blocks.Find(b => b.Id == childId);
                             if (childBlock != null && childBlock.BlockType == "WORD")
                             {
-                                textBuilder.Append(childBlock.Text);
-                                textBuilder.Append(" "); 
+                                cellText.Append(childBlock.Text);
+                                cellText.Append(" ");
                             }
                         }
                     }
                 }
 
-                tableCell.Text = textBuilder.ToString().Trim();
-                tableCell.Confidence = block.Confidence;
-                tableCell.RowIndex = block.RowIndex;
-                tableCell.ColumnIndex = block.ColumnIndex;
+                // Add the extracted text to the DataTable
+                extractedDataTable.Table.Rows.Add(cellText.ToString().Trim());
             }
+            else if (item.BlockType == "KEY_VALUE_SET" && item.EntityTypes.Contains("KEY"))
+            {
+                string key = "";
+                string value = "";
 
-            return tableCell;
+                foreach (var relationship in item.Relationships)
+                {
+                    if (relationship.Type == "CHILD")
+                    {
+                        foreach (var childId in relationship.Ids)
+                        {
+                            var childBlock = response.Blocks.Find(b => b.Id == childId);
+                            if (childBlock != null && childBlock.BlockType == "WORD")
+                            {
+                                if (item.EntityTypes.Contains("KEY"))
+                                {
+                                    key += childBlock.Text + " ";
+                                }
+                                else if (item.EntityTypes.Contains("VALUE"))
+                                {
+                                    value += childBlock.Text + " ";
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                {
+                    extractedForms.Add(new Forms { Key = key.Trim(), Value = value.Trim() });
+                }
+            }
         }
-    }
 
-    class Program
-    {
-        static async Task Main(string[] args)
+        // Extracted Text converted to serialized Json Format
+        Console.WriteLine("Extracted text:");
+        foreach (var text in extractedText)
         {
-            var awsCredentials = new Amazon.Runtime.BasicAWSCredentials("AKIATRMF5LV4HOEP45HR", "PjMUHt2sHUmfqd05v/ezbtbp6bbkwD4wTo0D9yum");
-            var awsRegion = Amazon.RegionEndpoint.APSoutheast1;
-
-            var textractClient = new AmazonTextractClient(awsCredentials, awsRegion);
-
-            string s3BucketName = "armansample";
-            string s3ObjectKey = "sampleimg1.jpg";
-
-            var extractedText = new List<TextClass>();
-            var extractedTableCells = new List<TableCell>();
-
-            var request = new AnalyzeDocumentRequest
-            {
-                Document = new Document
-                {
-                    S3Object = new S3Object
-                    {
-                        Bucket = s3BucketName,
-                        Name = s3ObjectKey
-                    }
-                },
-
-                FeatureTypes = new List<string> { "TABLES", "FORMS" }
-            };
-
-            var response = await textractClient.AnalyzeDocumentAsync(request);
-
-            foreach (var item in response.Blocks)
-            {
-                if (item.BlockType == "WORD")
-                {
-                    var textClass = new TextClass
-                    {
-                        Text = item.Text,
-                        Confidence = item.Confidence
-                    };
-                    extractedText.Add(textClass);
-                }
-                else if (item.BlockType == "CELL")
-                {
-                    TableCell tableCell = await TableCell.ExtractFromBlock(item, response);
-                    if (!string.IsNullOrWhiteSpace(tableCell.Text)) 
-                    {
-                        extractedTableCells.Add(tableCell);
-                    }
-                }
-            }
-            
-
-            Console.WriteLine("Extracted text:");
-            foreach (var text in extractedText)
+            if (text.Confidence > 50)
             {
                 var json = JsonConvert.SerializeObject(text, Formatting.Indented);
                 Console.WriteLine(json);
             }
-
-            Console.WriteLine("\nExtracted table cells:");
-            foreach (var cell in extractedTableCells)
-            {
-                var json = JsonConvert.SerializeObject(cell, Formatting.Indented);
-                Console.WriteLine(json);
-            }
-
-            Console.ReadLine();
         }
+
+        // Printing extracted table data
+        Console.WriteLine("\nExtracted table data:");
+        foreach (DataRow row in extractedDataTable.Table.Rows)
+        {
+            var json = JsonConvert.SerializeObject(row["Text"]);
+            Console.WriteLine(json);
+        }
+
+        // Printing extracted forms data
+        Console.WriteLine("\nExtracted forms data:");
+        foreach (var form in extractedForms)
+        {
+            var json = JsonConvert.SerializeObject(form, Formatting.Indented);
+            Console.WriteLine($"KEY({form.Key}) VALUES({form.Value})");
+        }
+
+        Console.ReadLine();
+    }
     }
 }
